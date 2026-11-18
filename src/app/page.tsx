@@ -31,6 +31,12 @@ export default function HomePage() {
   const [diagAnswers, setDiagAnswers] = useState<
     Record<string, { optionId: string; isCorrect: boolean; tag: MisconceptionTag }>
   >({});
+  const [diagFeedback, setDiagFeedback] = useState<{
+    optionId: string;
+    isCorrect: boolean;
+    tag: MisconceptionTag;
+    message: string;
+  } | null>(null);
   const [startingLevel, setStartingLevel] = useState<"Foundational" | "Standard">("Standard");
 
   // Screen 3: Interactive Balance Scale Primer state (2x + 3 = 11)
@@ -80,15 +86,44 @@ export default function HomePage() {
     };
     setDiagAnswers(updated);
 
+    let message = "";
+    if (isCorrect) {
+      message =
+        item.id === "D1"
+          ? "Spot on! 3(4) + 2 = 12 + 2 = 14. You know how to evaluate mystery x-bags!"
+          : "Nice! Subtracting 6 from both sides gives x = 14 − 6 = 8.";
+    } else if (tag === "M1") {
+      message =
+        "Watch the sign! You added 6 to 14 (14 + 6 = 20) instead of subtracting 6 from both sides (14 − 6 = 8). We'll practice this on the Balance Scale next!";
+    } else if (tag === "M2") {
+      message =
+        "Careful! You merged x and 6 into 7x. Remember: x is a mystery bag and 6 is loose coins—keep them separate and subtract 6 from both sides (x = 8).";
+    } else if (item.id === "D1") {
+      message =
+        "Not quite—3x means 3 times x. First multiply 3 × 4 = 12, then add 2 loose coins to get 14.";
+    } else {
+      message =
+        "Almost! To undo +6 on the left side, subtract 6 from 14 to get x = 8.";
+    }
+
+    setDiagFeedback({ optionId, isCorrect, tag, message });
+  };
+
+  const handleDiagContinue = () => {
+    if (!diagFeedback) return;
     if (diagIndex < DIAGNOSTIC_ITEMS.length - 1) {
       setDiagIndex(diagIndex + 1);
+      setDiagFeedback(null);
     } else {
-      const anyWrong = Object.values(updated).some((a) => !a.isCorrect);
-      const anyM1 = Object.values(updated).some((a) => a.tag === "M1");
+      const anyWrong = Object.values(diagAnswers).some((a) => !a.isCorrect);
+      const tags = Object.values(diagAnswers)
+        .map((a) => a.tag)
+        .filter((t): t is MisconceptionTag => t === "M1" || t === "M2");
       setStartingLevel(anyWrong ? "Foundational" : "Standard");
-      if (anyM1) {
-        setDetectedMisconceptions((prev) => (prev.includes("M1") ? prev : [...prev, "M1"]));
+      if (tags.length > 0) {
+        setDetectedMisconceptions((prev) => Array.from(new Set([...prev, ...tags])));
       }
+      setDiagFeedback(null);
       setScreen("primer");
     }
   };
@@ -295,6 +330,7 @@ export default function HomePage() {
     setDiagReady(false);
     setDiagIndex(0);
     setDiagAnswers({});
+    setDiagFeedback(null);
     setStartingLevel("Standard");
     setPrimerStep(0);
     setPrimerTilt(0);
@@ -539,18 +575,54 @@ export default function HomePage() {
             </p>
 
             <div className="grid sm:grid-cols-2 gap-3.5 pt-1">
-              {DIAGNOSTIC_ITEMS[diagIndex].options.map((opt) => (
-                <button
-                  key={opt.id}
-                  type="button"
-                  onClick={() => handleDiagSelect(opt.id, opt.isCorrect, opt.misconceptionTag)}
-                  className="text-left rounded-xl border-2 border-slate-200 bg-white p-4 text-base hover:border-indigo-500 hover:bg-indigo-50/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-                >
-                  <span className="inline-block font-bold text-indigo-700 mr-2">{opt.id})</span>
-                  <span className="font-semibold text-slate-900">{opt.label}</span>
-                </button>
-              ))}
+              {DIAGNOSTIC_ITEMS[diagIndex].options.map((opt) => {
+                const isSelected = diagFeedback?.optionId === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    disabled={Boolean(diagFeedback)}
+                    onClick={() => handleDiagSelect(opt.id, opt.isCorrect, opt.misconceptionTag)}
+                    className={`text-left rounded-xl border-2 p-4 text-base transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
+                      isSelected
+                        ? opt.isCorrect
+                          ? "border-emerald-600 bg-emerald-50"
+                          : "border-amber-500 bg-amber-50"
+                        : "border-slate-200 bg-white hover:border-indigo-500 hover:bg-indigo-50/40"
+                    }`}
+                  >
+                    <span className="inline-block font-bold text-indigo-700 mr-2">{opt.id})</span>
+                    <span className="font-semibold text-slate-900">{opt.label}</span>
+                  </button>
+                );
+              })}
             </div>
+
+            {diagFeedback && (
+              <div
+                className={`rounded-xl border p-4 space-y-3 ${
+                  diagFeedback.isCorrect
+                    ? "bg-emerald-50 border-emerald-200 text-emerald-950"
+                    : "bg-amber-50 border-amber-300 text-amber-950"
+                }`}
+              >
+                <p className="text-sm sm:text-base font-bold">
+                  {diagFeedback.isCorrect ? "Nice work!" : "Not quite — here's why:"}
+                </p>
+                <p className="text-sm sm:text-base">{diagFeedback.message}</p>
+                <div className="pt-1">
+                  <button
+                    type="button"
+                    onClick={handleDiagContinue}
+                    className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-bold text-white hover:bg-slate-800"
+                  >
+                    {diagIndex < DIAGNOSTIC_ITEMS.length - 1
+                      ? "Next Warm-Up Question →"
+                      : "Continue to Scale Lab →"}
+                  </button>
+                </div>
+              </div>
+            )}
           </section>
         )}
 
