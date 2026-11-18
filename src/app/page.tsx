@@ -65,6 +65,7 @@ export default function HomePage() {
   const [resolvedMisconceptions, setResolvedMisconceptions] = useState<MisconceptionTag[]>([]);
   const [traceLog, setTraceLog] = useState<DecisionTraceEntry[]>([]);
   const [toolsOpen, setToolsOpen] = useState<boolean>(false);
+  const [prereqLessonDone, setPrereqLessonDone] = useState<boolean>(false);
 
   // Last evaluation banner in Screen 4
   const [lastFeedback, setLastFeedback] = useState<{
@@ -298,6 +299,7 @@ export default function HomePage() {
       return;
     }
     setCurrentQuestionId(lastFeedback.nextQuestionId);
+    setPrereqLessonDone(false);
     setLastFeedback(null);
     resetQuestionInputs();
   };
@@ -335,6 +337,7 @@ export default function HomePage() {
     setPrimerStep(0);
     setPrimerTilt(0);
     setCurrentQuestionId("Q_CORE_1");
+    setPrereqLessonDone(false);
     setStreak(0);
     setConsecutiveErrors(0);
     setCompletedIds([]);
@@ -720,8 +723,58 @@ export default function HomePage() {
         {/* SCREEN 4: ADAPTIVE PRACTICE & REASONING STUDIO */}
         {screen === "practice" && (
           <div className="space-y-5">
-            {/* Active Question Card */}
-            <section className="rounded-2xl border border-slate-200 bg-white p-6 sm:p-8 shadow-sm space-y-5">
+            {/* Standalone Concept Refresher Window (shown first after 2 consecutive errors, before Q_PREREQ_1) */}
+            {currentQuestion.id === "Q_PREREQ_1" && !prereqLessonDone ? (
+              <section className="rounded-2xl border border-indigo-200 bg-white p-6 sm:p-8 shadow-sm space-y-5">
+                <div className="space-y-2">
+                  <span className="inline-block rounded-full bg-indigo-100 px-3 py-1 text-xs font-bold text-indigo-800">
+                    Concept Refresher · Before Your Next Question
+                  </span>
+                  <h2 className="text-xl sm:text-2xl font-bold text-slate-900">
+                    Let&apos;s Pause &amp; Learn Together (30-Second Refresher)
+                  </h2>
+                  <p className="text-sm sm:text-base text-slate-700">
+                    You&apos;ve had two tricky ones in a row—no worries! Let&apos;s quickly review
+                    the two golden rules of the Balance Scale before trying a quick follow-up check.
+                  </p>
+                </div>
+
+                <div className="grid sm:grid-cols-2 gap-4 text-sm">
+                  <div className="rounded-xl bg-indigo-50/70 border border-indigo-200 p-4 space-y-1.5">
+                    <p className="font-bold text-indigo-900">1. Keep Bags &amp; Coins Separate</p>
+                    <p className="text-slate-700 leading-relaxed">
+                      <strong>4x + 3</strong> means <strong>4 mystery x-bags</strong> and{" "}
+                      <strong>3 loose ₹1 coins</strong>. Never add 4 and 3 to make 7x!
+                    </p>
+                  </div>
+                  <div className="rounded-xl bg-emerald-50/70 border border-emerald-200 p-4 space-y-1.5">
+                    <p className="font-bold text-emerald-900">2. Flip the Sign on Both Sides</p>
+                    <p className="text-slate-700 leading-relaxed">
+                      To undo <strong>+3</strong>, <strong>subtract 3</strong> from both sides. To
+                      undo <strong>−6</strong>, <strong>add 6</strong> to both sides.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="rounded-xl bg-slate-50 border border-slate-200 p-4 text-sm text-slate-800">
+                  <strong>Quick Example (test x = 2):</strong> <code>4(2) + 3 = 11</code>, while{" "}
+                  <code>7(2) = 14</code>. Since <code>11 &ne; 14</code>,{" "}
+                  <code>4x + 3</code> and <code>7x</code> are never the same!
+                </div>
+
+                <div className="flex justify-end pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setPrereqLessonDone(true)}
+                    className="rounded-xl bg-indigo-600 px-6 py-3.5 text-base font-bold text-white hover:bg-indigo-700"
+                  >
+                    Got It! Try the Follow-Up Check &rarr;
+                  </button>
+                </div>
+              </section>
+            ) : (
+              /* Active Question Card */
+              <section className="rounded-2xl border border-slate-200 bg-white p-6 sm:p-8 shadow-sm space-y-5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="rounded-full bg-indigo-100 px-3 py-1 text-xs font-bold text-indigo-800">
                   {currentQuestion.badge}
@@ -753,35 +806,6 @@ export default function HomePage() {
                   <p className="text-sm text-slate-600">{currentQuestion.contextNote}</p>
                 )}
               </div>
-
-              {/* Prerequisite Teaching Mini-Lesson (shown after 2 consecutive errors) */}
-              {currentQuestion.id === "Q_PREREQ_1" && (
-                <div className="rounded-xl border border-indigo-200 bg-indigo-50/70 p-4 sm:p-5 space-y-3">
-                  <p className="text-sm font-bold text-indigo-950">
-                    Let&apos;s Pause &amp; Learn Together (30-Second Refresher)
-                  </p>
-                  <div className="grid sm:grid-cols-2 gap-3 text-xs sm:text-sm">
-                    <div className="rounded-lg bg-white border border-indigo-100 p-3 space-y-1">
-                      <p className="font-bold text-indigo-800">1. Keep Bags &amp; Coins Separate</p>
-                      <p className="text-slate-700">
-                        <strong>4x + 3</strong> means <strong>4 mystery x-bags</strong> and{" "}
-                        <strong>3 loose ₹1 coins</strong>. Never add 4 and 3 to make 7x!
-                      </p>
-                    </div>
-                    <div className="rounded-lg bg-white border border-indigo-100 p-3 space-y-1">
-                      <p className="font-bold text-emerald-800">2. Flip the Sign on Both Sides</p>
-                      <p className="text-slate-700">
-                        To undo <strong>+3</strong>, <strong>subtract 3</strong> from both sides. To
-                        undo <strong>−6</strong>, <strong>add 6</strong> to both sides.
-                      </p>
-                    </div>
-                  </div>
-                  <p className="text-xs text-indigo-900 font-medium">
-                    Try testing <strong>x = 2</strong>: <code>4(2) + 3 = 11</code>, while{" "}
-                    <code>7(2) = 14</code>. Now answer the quick check below!
-                  </p>
-                </div>
-              )}
 
               {/* Format 1: Diagnostic Multiple Choice */}
               {currentQuestion.format === "MCQ" && currentQuestion.options && (
@@ -1007,6 +1031,7 @@ export default function HomePage() {
                 </div>
               )}
             </section>
+            )}
 
             {/* Discreet Collapsible Teacher / Evaluator Tools (Demo Quick-Fill + Decision Trace) */}
             <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
