@@ -14,22 +14,19 @@ import {
 } from "@/lib/adaptiveEngine";
 
 const SCREEN_STEPS: { id: ScreenId; label: string }[] = [
-  { id: "welcome", label: "1. Setup" },
+  { id: "welcome", label: "1. Welcome" },
   { id: "diagnostic", label: "2. Warm-Up" },
   { id: "primer", label: "3. Scale Lab" },
   { id: "practice", label: "4. Practice" },
-  { id: "report", label: "5. Mastery" },
+  { id: "report", label: "5. Summary" },
 ];
 
 export default function HomePage() {
   const [screen, setScreen] = useState<ScreenId>("welcome");
-  const [simulateOffline, setSimulateOffline] = useState<boolean>(true);
-  const [fallbackReason, setFallbackReason] = useState<string>(
-    "Low-Bandwidth Fallback Active: Running built-in offline misconception parser & adaptive item bank (<100 KB)"
-  );
   const [showAbout, setShowAbout] = useState<boolean>(false);
 
-  // Screen 2: Diagnostic state
+  // Screen 2: Self-Evaluation Guide + Diagnostic state
+  const [diagReady, setDiagReady] = useState<boolean>(false);
   const [diagIndex, setDiagIndex] = useState<number>(0);
   const [diagAnswers, setDiagAnswers] = useState<
     Record<string, { optionId: string; isCorrect: boolean; tag: MisconceptionTag }>
@@ -61,7 +58,7 @@ export default function HomePage() {
   const [detectedMisconceptions, setDetectedMisconceptions] = useState<MisconceptionTag[]>([]);
   const [resolvedMisconceptions, setResolvedMisconceptions] = useState<MisconceptionTag[]>([]);
   const [traceLog, setTraceLog] = useState<DecisionTraceEntry[]>([]);
-  const [traceOpen, setTraceOpen] = useState<boolean>(true);
+  const [toolsOpen, setToolsOpen] = useState<boolean>(false);
 
   // Last evaluation banner in Screen 4
   const [lastFeedback, setLastFeedback] = useState<{
@@ -149,7 +146,11 @@ export default function HomePage() {
     explanationInput?: string;
     step1Choice?: string;
     step2Choice?: string;
+    questionIdOverride?: string;
   }) => {
+    const targetQId = override?.questionIdOverride ?? currentQuestion.id;
+    const targetQ = QUESTION_BANK[targetQId] ?? currentQuestion;
+
     const optId = override?.selectedOptionId ?? selectedOptionId;
     const numVal = override?.numericInput ?? numericInput;
     const expVal = override?.explanationInput ?? explanationInput;
@@ -157,10 +158,10 @@ export default function HomePage() {
     const s2 = override?.step2Choice ?? step2Choice;
 
     let learnerAnswer = numVal;
-    if (currentQuestion.format === "MCQ" && currentQuestion.options) {
-      const opt = currentQuestion.options.find((o) => o.id === optId);
+    if (targetQ.format === "MCQ" && targetQ.options) {
+      const opt = targetQ.options.find((o) => o.id === optId);
       learnerAnswer = opt ? opt.label : "";
-    } else if (currentQuestion.format === "BALANCE_BUILDER") {
+    } else if (targetQ.format === "BALANCE_BUILDER") {
       learnerAnswer = `Step1:${s1}, Step2:${s2}`;
     }
 
@@ -172,24 +173,16 @@ export default function HomePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          questionId: currentQuestion.id,
-          questionPrompt: currentQuestion.prompt,
+          questionId: targetQ.id,
+          questionPrompt: targetQ.prompt,
           learnerAnswer,
           explanationText: expVal,
           selectedOptionId: optId,
           step1Choice: s1,
           step2Choice: s2,
-          simulateOffline,
         }),
       });
       const data = await res.json();
-
-      if (data.mode === "fallback" || data.mode === "offline") {
-        setFallbackReason(
-          data.fallbackReason ||
-            "Low-Bandwidth Fallback Active: Running built-in offline misconception parser & adaptive item bank (<100 KB)"
-        );
-      }
 
       const isCorrect = Boolean(data.isCorrect);
       const tag = (data.misconceptionTag || "NONE") as MisconceptionTag;
@@ -197,23 +190,23 @@ export default function HomePage() {
       const newStreak = isCorrect ? streak + 1 : 0;
       const newConsecErrors = isCorrect ? 0 : consecutiveErrors + 1;
       const newCompleted = isCorrect
-        ? Array.from(new Set([...completedIds, currentQuestion.id]))
+        ? Array.from(new Set([...completedIds, targetQ.id]))
         : completedIds;
 
       if (!isCorrect && (tag === "M1" || tag === "M2")) {
         setDetectedMisconceptions((prev) => (prev.includes(tag) ? prev : [...prev, tag]));
       }
       if (isCorrect) {
-        if (currentQuestion.id === "Q_REM_M1") {
+        if (targetQ.id === "Q_REM_M1") {
           setResolvedMisconceptions((prev) => (prev.includes("M1") ? prev : [...prev, "M1"]));
         }
-        if (currentQuestion.id === "Q_REM_M2" || currentQuestion.id === "Q_PREREQ_1") {
+        if (targetQ.id === "Q_REM_M2" || targetQ.id === "Q_PREREQ_1") {
           setResolvedMisconceptions((prev) => (prev.includes("M2") ? prev : [...prev, "M2"]));
         }
       }
 
       const decision = decideNextStep({
-        currentQuestionId: currentQuestion.id,
+        currentQuestionId: targetQ.id,
         isCorrect,
         misconceptionTag: tag,
         hintCount,
@@ -223,8 +216,8 @@ export default function HomePage() {
 
       const entry: DecisionTraceEntry = {
         stepNumber: traceLog.length + 1,
-        questionId: currentQuestion.id,
-        equation: currentQuestion.equation,
+        questionId: targetQ.id,
+        equation: targetQ.equation,
         learnerAnswer,
         isCorrect,
         misconceptionTag: tag,
@@ -267,25 +260,25 @@ export default function HomePage() {
       setLastFeedback(null);
       setSelectedOptionId("A");
       setHintCount(0);
-      submitPracticeAnswer({ selectedOptionId: "A" });
+      submitPracticeAnswer({ questionIdOverride: "Q_CORE_1", selectedOptionId: "A" });
     } else if (scenario === "B_M1") {
       setCurrentQuestionId("Q_CORE_1");
       setLastFeedback(null);
       setSelectedOptionId("B");
       setHintCount(0);
-      submitPracticeAnswer({ selectedOptionId: "B" });
+      submitPracticeAnswer({ questionIdOverride: "Q_CORE_1", selectedOptionId: "B" });
     } else {
-      // Trigger M2 on Q_REM_M1 (option C: 5x = 14) to demonstrate 2nd consecutive error -> STEP_BACK_PREREQUISITE
       setCurrentQuestionId("Q_REM_M1");
       setLastFeedback(null);
       setSelectedOptionId("C");
       setHintCount(0);
-      submitPracticeAnswer({ selectedOptionId: "C" });
+      submitPracticeAnswer({ questionIdOverride: "Q_REM_M1", selectedOptionId: "C" });
     }
   };
 
   const restartSession = () => {
     setScreen("welcome");
+    setDiagReady(false);
     setDiagIndex(0);
     setDiagAnswers({});
     setStartingLevel("Standard");
@@ -326,56 +319,39 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
-      {/* Persistent Top Navigation & Low-Bandwidth Controls */}
+      {/* Clean, Accessible Top Navigation */}
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
-        <div className="mx-auto max-w-5xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white font-bold flex items-center justify-center text-sm shadow-sm">
+        <div className="mx-auto max-w-4xl px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div
+              className="w-9 h-9 rounded-xl bg-indigo-600 text-white font-bold flex items-center justify-center text-lg shadow-sm"
+              aria-hidden="true"
+            >
               =
             </div>
             <div>
-              <h1 className="text-sm sm:text-base font-bold text-slate-900 leading-tight">
+              <h1 className="text-base sm:text-lg font-bold text-slate-900 leading-tight">
                 BalanceMath Tutor
               </h1>
-              <p className="text-[11px] text-slate-500">
-                Class 8 Linear Equations · NGO Tablet Edition
+              <p className="text-xs text-slate-500">
+                Class 8 Linear Equations · Easy &amp; Step-by-Step
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 flex-wrap">
-            <label className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-700 cursor-pointer hover:bg-slate-100">
-              <input
-                type="checkbox"
-                checked={simulateOffline}
-                onChange={(e) => {
-                  const checked = e.target.checked;
-                  setSimulateOffline(checked);
-                  if (checked) {
-                    setFallbackReason(
-                      "Low-Bandwidth Fallback Active: Running built-in offline misconception parser & adaptive item bank (<100 KB)"
-                    );
-                  }
-                }}
-                className="accent-amber-600"
-              />
-              <span>Simulate AI Timeout / Offline Fallback</span>
-            </label>
-
-            <button
-              type="button"
-              onClick={() => setShowAbout(true)}
-              className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-800 hover:bg-indigo-100"
-            >
-              About (24B1292)
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => setShowAbout(true)}
+            className="rounded-xl border border-indigo-200 bg-indigo-50 px-3.5 py-2 text-xs sm:text-sm font-semibold text-indigo-800 hover:bg-indigo-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+          >
+            About (24B1292)
+          </button>
         </div>
 
         {/* 5-Screen Progress Bar */}
         <nav
-          aria-label="Lesson progress"
-          className="mx-auto max-w-5xl px-4 pb-2 flex items-center gap-1.5 overflow-x-auto"
+          aria-label="Lesson steps"
+          className="mx-auto max-w-4xl px-4 pb-2.5 flex items-center gap-2 overflow-x-auto"
         >
           {SCREEN_STEPS.map((s) => {
             const active = screen === s.id;
@@ -384,10 +360,10 @@ export default function HomePage() {
                 key={s.id}
                 type="button"
                 onClick={() => setScreen(s.id)}
-                className={`px-2.5 py-1 rounded-md text-xs font-semibold whitespace-nowrap transition-colors ${
+                className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
                   active
-                    ? "bg-indigo-600 text-white"
-                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    ? "bg-indigo-600 text-white shadow-sm"
+                    : "bg-slate-100 text-slate-700 hover:bg-slate-200"
                 }`}
               >
                 {s.label}
@@ -395,62 +371,49 @@ export default function HomePage() {
             );
           })}
         </nav>
-
-        {/* Low-Bandwidth Fallback Banner (C1) */}
-        {simulateOffline && (
-          <div className="bg-amber-50 border-t border-amber-200 px-4 py-1.5 text-center text-xs font-medium text-amber-900">
-            <span className="inline-block w-2 h-2 rounded-full bg-amber-500 mr-2 align-middle" />
-            {fallbackReason}
-          </div>
-        )}
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 mx-auto w-full max-w-4xl px-4 py-6">
-        {/* SCREEN 1: WELCOME & LOW-BANDWIDTH SETUP */}
+      <main className="flex-1 mx-auto w-full max-w-3xl px-4 py-6 sm:py-8">
+        {/* SCREEN 1: WELCOME */}
         {screen === "welcome" && (
           <section className="rounded-2xl border border-slate-200 bg-white p-6 sm:p-8 shadow-sm space-y-6">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 border border-emerald-200 px-3 py-1 text-xs font-semibold text-emerald-800">
-                Low-Bandwidth Ready · &lt;100 KB Inline SVG Bundle
-              </span>
-              <span className="text-xs font-semibold text-slate-500">
-                25-Minute NGO Tablet Session
-              </span>
-            </div>
-
             <div className="space-y-3">
-              <h2 className="text-2xl sm:text-3xl font-bold text-slate-900">
-                Welcome, Aarav! Let&apos;s Master Linear Equations Together.
+              <span className="inline-block rounded-full bg-indigo-50 border border-indigo-200 px-3 py-1 text-xs font-semibold text-indigo-800">
+                Class 8 Algebra · 25-Minute Guided Session
+              </span>
+              <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 leading-snug">
+                Hi Aarav! Let&apos;s Solve Equations Without Guesswork.
               </h2>
-              <p className="text-sm sm:text-base text-slate-700 leading-relaxed">
-                Today we&apos;ll treat every equation like a{" "}
-                <strong className="text-indigo-700">kirana weighing scale</strong>. As long as you
-                do the exact same operation to{" "}
-                <strong className="text-emerald-700">both sides</strong>, the scale stays level!
+              <p className="text-base text-slate-700 leading-relaxed">
+                Think of every equation like a{" "}
+                <strong className="text-indigo-700">kirana weighing scale</strong>. Whatever you
+                do to one side, just do the{" "}
+                <strong className="text-emerald-700">exact same thing to the other side</strong>,
+                and the scale stays level!
               </p>
             </div>
 
-            <div className="grid sm:grid-cols-3 gap-3">
+            <div className="grid sm:grid-cols-3 gap-3.5">
               <div className="rounded-xl bg-slate-50 border border-slate-200 p-4">
-                <p className="text-xs font-bold uppercase text-indigo-700">Step 1 · 3 mins</p>
-                <p className="text-sm font-semibold text-slate-900 mt-1">Quick Warm-Up</p>
-                <p className="text-xs text-slate-600 mt-1">
-                  2 short questions to find your best starting level.
+                <p className="text-xs font-bold uppercase text-indigo-700">1. Quick Check</p>
+                <p className="text-sm font-bold text-slate-900 mt-1">2 Warm-Up Questions</p>
+                <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                  No pressure—just helps us pick the right starting level for you.
                 </p>
               </div>
               <div className="rounded-xl bg-slate-50 border border-slate-200 p-4">
-                <p className="text-xs font-bold uppercase text-indigo-700">Step 2 · 5 mins</p>
-                <p className="text-sm font-semibold text-slate-900 mt-1">Balance Scale Lab</p>
-                <p className="text-xs text-slate-600 mt-1">
-                  Move mystery x-bags and ₹1 coins on an interactive scale.
+                <p className="text-xs font-bold uppercase text-indigo-700">2. Scale Lab</p>
+                <p className="text-sm font-bold text-slate-900 mt-1">See Bags &amp; Coins</p>
+                <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                  Play with an interactive balance scale before solving on your own.
                 </p>
               </div>
               <div className="rounded-xl bg-slate-50 border border-slate-200 p-4">
-                <p className="text-xs font-bold uppercase text-indigo-700">Step 3 · 15 mins</p>
-                <p className="text-sm font-semibold text-slate-900 mt-1">Adaptive Practice</p>
-                <p className="text-xs text-slate-600 mt-1">
-                  3 question formats with instant hints and real-life auto-fare problems.
+                <p className="text-xs font-bold uppercase text-indigo-700">3. Practice</p>
+                <p className="text-sm font-bold text-slate-900 mt-1">Check Your Thinking</p>
+                <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                  Get instant hints and everyday auto-fare problems at your own pace.
                 </p>
               </div>
             </div>
@@ -458,49 +421,116 @@ export default function HomePage() {
             <div className="flex flex-wrap items-center gap-3 pt-2">
               <button
                 type="button"
-                onClick={() => setScreen("diagnostic")}
-                className="rounded-xl bg-indigo-600 px-6 py-3 text-sm font-bold text-white shadow-sm hover:bg-indigo-700 transition-colors"
+                onClick={() => {
+                  setDiagReady(false);
+                  setScreen("diagnostic");
+                }}
+                className="rounded-xl bg-indigo-600 px-6 py-3.5 text-base font-bold text-white shadow-sm hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
               >
-                Start 2-Question Warm-Up &rarr;
+                Let&apos;s Begin &rarr;
               </button>
               <button
                 type="button"
-                onClick={() => setScreen("practice")}
-                className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                onClick={() => setScreen("primer")}
+                className="rounded-xl border border-slate-300 bg-white px-5 py-3.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
               >
-                Jump Directly to Practice Studio
+                Explore Balance Scale First
               </button>
             </div>
           </section>
         )}
 
-        {/* SCREEN 2: DIAGNOSTIC WARM-UP (2 ITEMS) */}
-        {screen === "diagnostic" && (
+        {/* SCREEN 2: SELF-EVALUATION GUIDE WINDOW -> DIAGNOSTIC WARM-UP */}
+        {screen === "diagnostic" && !diagReady && (
+          <section className="rounded-2xl border border-slate-200 bg-white p-6 sm:p-8 shadow-sm space-y-6">
+            <div className="space-y-2">
+              <span className="inline-block rounded-full bg-emerald-50 border border-emerald-200 px-3 py-1 text-xs font-semibold text-emerald-800">
+                Before We Start · How to Check Yourself
+              </span>
+              <h2 className="text-2xl font-bold text-slate-900">
+                This is Your Space to Practice—Not a Test!
+              </h2>
+              <p className="text-base text-slate-700 leading-relaxed">
+                Here is how you can use this tutor to check your own understanding:
+              </p>
+            </div>
+
+            <ol className="space-y-3 text-sm sm:text-base text-slate-800">
+              <li className="flex items-start gap-3 rounded-xl bg-slate-50 border border-slate-200 p-4">
+                <span className="flex-shrink-0 w-7 h-7 rounded-full bg-indigo-600 text-white font-bold flex items-center justify-center text-sm">
+                  1
+                </span>
+                <div>
+                  <strong>Try your best first:</strong> Pick an answer or type what you think. If
+                  you make a slip, the tutor will show you <em>why</em> without judging.
+                </div>
+              </li>
+              <li className="flex items-start gap-3 rounded-xl bg-slate-50 border border-slate-200 p-4">
+                <span className="flex-shrink-0 w-7 h-7 rounded-full bg-indigo-600 text-white font-bold flex items-center justify-center text-sm">
+                  2
+                </span>
+                <div>
+                  <strong>Use the Hint &amp; Balance Scale anytime:</strong> If you feel stuck, tap{" "}
+                  <strong>Show Hint</strong> to get a gentle clue on what to do next.
+                </div>
+              </li>
+              <li className="flex items-start gap-3 rounded-xl bg-slate-50 border border-slate-200 p-4">
+                <span className="flex-shrink-0 w-7 h-7 rounded-full bg-indigo-600 text-white font-bold flex items-center justify-center text-sm">
+                  3
+                </span>
+                <div>
+                  <strong>Explain in one short sentence:</strong> When asked &ldquo;why&rdquo;,
+                  write how you balanced both sides in your own simple words—that&apos;s the best
+                  way to check yourself!
+                </div>
+              </li>
+            </ol>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setScreen("welcome")}
+                className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                &larr; Back
+              </button>
+              <button
+                type="button"
+                onClick={() => setDiagReady(true)}
+                className="rounded-xl bg-indigo-600 px-6 py-3.5 text-base font-bold text-white shadow-sm hover:bg-indigo-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+              >
+                Start 2-Question Warm-Up &rarr;
+              </button>
+            </div>
+          </section>
+        )}
+
+        {screen === "diagnostic" && diagReady && (
           <section className="rounded-2xl border border-slate-200 bg-white p-6 sm:p-8 shadow-sm space-y-5">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold uppercase tracking-wide text-indigo-700">
-                Diagnostic Warm-Up · Question {diagIndex + 1} of {DIAGNOSTIC_ITEMS.length}
+                Warm-Up · Question {diagIndex + 1} of {DIAGNOSTIC_ITEMS.length}
               </span>
-              <span className="text-xs text-slate-500">Sets your starting path</span>
+              <span className="text-xs text-slate-500">Helps us pick your starting level</span>
             </div>
 
-            <h2 className="text-xl font-bold text-slate-900">
+            <h2 className="text-xl sm:text-2xl font-bold text-slate-900">
               {DIAGNOSTIC_ITEMS[diagIndex].title}
             </h2>
-            <p className="text-base text-slate-800 font-medium">
+            <p className="text-base sm:text-lg text-slate-800 font-medium">
               {DIAGNOSTIC_ITEMS[diagIndex].prompt}
             </p>
-            <p className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
-              Tip: {DIAGNOSTIC_ITEMS[diagIndex].hint}
+            <p className="text-sm text-slate-700 bg-sky-50 border border-sky-200 rounded-xl px-4 py-3">
+              <strong>Friendly Tip:</strong> {DIAGNOSTIC_ITEMS[diagIndex].hint}
             </p>
 
-            <div className="grid sm:grid-cols-2 gap-3 pt-1">
+            <div className="grid sm:grid-cols-2 gap-3.5 pt-1">
               {DIAGNOSTIC_ITEMS[diagIndex].options.map((opt) => (
                 <button
                   key={opt.id}
                   type="button"
                   onClick={() => handleDiagSelect(opt.id, opt.isCorrect, opt.misconceptionTag)}
-                  className="text-left rounded-xl border-2 border-slate-200 bg-white p-4 hover:border-indigo-500 hover:bg-indigo-50/40 transition-colors"
+                  className="text-left rounded-xl border-2 border-slate-200 bg-white p-4 text-base hover:border-indigo-500 hover:bg-indigo-50/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
                 >
                   <span className="inline-block font-bold text-indigo-700 mr-2">{opt.id})</span>
                   <span className="font-semibold text-slate-900">{opt.label}</span>
@@ -515,18 +545,18 @@ export default function HomePage() {
           <section className="rounded-2xl border border-slate-200 bg-white p-6 sm:p-8 shadow-sm space-y-5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-xs font-bold uppercase tracking-wide text-indigo-700">
-                Concept Primer · Interactive Balance Scale
+                Scale Lab · See How Balancing Works
               </span>
-              <span className="rounded-full bg-indigo-50 border border-indigo-200 px-3 py-0.5 text-xs font-semibold text-indigo-800">
-                Diagnostic Level: {startingLevel}
+              <span className="rounded-full bg-indigo-50 border border-indigo-200 px-3 py-1 text-xs font-semibold text-indigo-800">
+                Your Path: {startingLevel}
               </span>
             </div>
 
             <div className="space-y-2">
-              <h2 className="text-xl font-bold text-slate-900">
+              <h2 className="text-xl sm:text-2xl font-bold text-slate-900">
                 Notice how we keep the weighing scale level!
               </h2>
-              <p className="text-sm text-slate-700 leading-relaxed">
+              <p className="text-base text-slate-700 leading-relaxed">
                 Think of <strong className="text-indigo-700">x</strong> as a{" "}
                 <strong>sealed mystery bag</strong> and plain numbers as{" "}
                 <strong className="text-amber-700">loose ₹1 coins</strong>. Never merge bags and
@@ -551,7 +581,7 @@ export default function HomePage() {
             />
 
             <div
-              className={`rounded-xl border p-3.5 text-sm font-medium ${
+              className={`rounded-xl border p-4 text-sm sm:text-base font-medium ${
                 primerTilt !== 0
                   ? "bg-amber-50 border-amber-200 text-amber-900"
                   : primerStep === 2
@@ -562,12 +592,12 @@ export default function HomePage() {
               {primerMessage}
             </div>
 
-            <div className="flex flex-wrap gap-2.5">
+            <div className="flex flex-wrap gap-3">
               <button
                 type="button"
                 disabled={primerStep !== 0}
                 onClick={() => handlePrimerAction("SUB_3")}
-                className="rounded-lg bg-indigo-600 px-4 py-2 text-xs sm:text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-40"
+                className="rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-40"
               >
                 Subtract 3 from both sides
               </button>
@@ -575,7 +605,7 @@ export default function HomePage() {
                 type="button"
                 disabled={primerStep !== 0}
                 onClick={() => handlePrimerAction("ADD_3")}
-                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs sm:text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40"
               >
                 Add 3 to both sides
               </button>
@@ -583,19 +613,19 @@ export default function HomePage() {
                 type="button"
                 disabled={primerStep === 2}
                 onClick={() => handlePrimerAction("DIV_2")}
-                className="rounded-lg bg-emerald-600 px-4 py-2 text-xs sm:text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-40"
+                className="rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-40"
               >
                 Divide both sides by 2
               </button>
             </div>
 
-            <div className="pt-2 border-t border-slate-100 flex justify-end">
+            <div className="pt-3 border-t border-slate-100 flex justify-end">
               <button
                 type="button"
                 onClick={() => setScreen("practice")}
-                className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-bold text-white hover:bg-slate-800"
+                className="rounded-xl bg-slate-900 px-6 py-3.5 text-base font-bold text-white hover:bg-slate-800"
               >
-                Go to Adaptive Practice Studio &rarr;
+                Start Practice &rarr;
               </button>
             </div>
           </section>
@@ -603,65 +633,38 @@ export default function HomePage() {
 
         {/* SCREEN 4: ADAPTIVE PRACTICE & REASONING STUDIO */}
         {screen === "practice" && (
-          <div className="space-y-4">
-            {/* Evaluator Demo Quick-Fill Bar */}
-            <div className="rounded-xl border border-indigo-200 bg-indigo-50/70 px-4 py-2.5 flex flex-wrap items-center justify-between gap-2">
-              <span className="text-xs font-bold text-indigo-950">
-                Evaluator Demo Quick-Fill:
-              </span>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => runDemoQuickFill("A_CORRECT")}
-                  className="rounded-md bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-emerald-700"
-                >
-                  Scenario A: Correct (ADVANCE)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => runDemoQuickFill("B_M1")}
-                  className="rounded-md bg-amber-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-amber-700"
-                >
-                  Scenario B1: M1 Error (REMEDIATE)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => runDemoQuickFill("B_M2")}
-                  className="rounded-md bg-rose-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-rose-700"
-                >
-                  Scenario B2: 2nd Error (PREREQUISITE)
-                </button>
-              </div>
-            </div>
-
+          <div className="space-y-5">
             {/* Active Question Card */}
-            <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+            <section className="rounded-2xl border border-slate-200 bg-white p-6 sm:p-8 shadow-sm space-y-5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="rounded-full bg-indigo-100 px-3 py-1 text-xs font-bold text-indigo-800">
                   {currentQuestion.badge}
                 </span>
-                <div className="flex items-center gap-3 text-xs font-semibold text-slate-600">
-                  <span>Streak: {streak}</span>
-                  <span>Consecutive Errors: {consecutiveErrors}</span>
-                  <span>Hints: {hintCount}</span>
+                <div className="flex items-center gap-3 text-xs sm:text-sm font-semibold text-slate-600">
+                  <span className="rounded-lg bg-slate-100 px-2.5 py-1">
+                    In a row: {streak}
+                  </span>
+                  <span className="rounded-lg bg-slate-100 px-2.5 py-1">
+                    Hints used: {hintCount}
+                  </span>
                 </div>
               </div>
 
-              <div className="space-y-1.5">
-                <div className="text-2xl font-mono font-bold text-slate-900 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 inline-block">
+              <div className="space-y-2">
+                <div className="text-2xl sm:text-3xl font-mono font-bold text-slate-900 bg-slate-50 border border-slate-200 rounded-xl px-5 py-3.5 inline-block">
                   {currentQuestion.equation}
                 </div>
-                <p className="text-base font-semibold text-slate-900 pt-1">
+                <p className="text-base sm:text-lg font-semibold text-slate-900 pt-1">
                   {currentQuestion.prompt}
                 </p>
                 {currentQuestion.contextNote && (
-                  <p className="text-xs text-slate-600">{currentQuestion.contextNote}</p>
+                  <p className="text-sm text-slate-600">{currentQuestion.contextNote}</p>
                 )}
               </div>
 
               {/* Format 1: Diagnostic Multiple Choice */}
               {currentQuestion.format === "MCQ" && currentQuestion.options && (
-                <div className="grid sm:grid-cols-2 gap-3">
+                <div className="grid sm:grid-cols-2 gap-3.5">
                   {currentQuestion.options.map((opt) => {
                     const selected = selectedOptionId === opt.id;
                     return (
@@ -670,14 +673,14 @@ export default function HomePage() {
                         type="button"
                         disabled={Boolean(lastFeedback)}
                         onClick={() => setSelectedOptionId(opt.id)}
-                        className={`text-left rounded-xl border-2 p-3.5 transition-colors ${
+                        className={`text-left rounded-xl border-2 p-4 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
                           selected
                             ? "border-indigo-600 bg-indigo-50"
                             : "border-slate-200 bg-white hover:border-slate-300"
                         }`}
                       >
                         <span className="font-bold text-indigo-700 mr-2">{opt.id})</span>
-                        <span className="font-semibold text-slate-900 text-sm">{opt.label}</span>
+                        <span className="font-semibold text-slate-900 text-base">{opt.label}</span>
                       </button>
                     );
                   })}
@@ -704,14 +707,18 @@ export default function HomePage() {
                     />
                     <div className="grid sm:grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                        <label
+                          htmlFor="step1-select"
+                          className="block text-sm font-bold text-slate-700 mb-1.5"
+                        >
                           Step 1: Undo −4
                         </label>
                         <select
+                          id="step1-select"
                           value={step1Choice}
                           disabled={Boolean(lastFeedback)}
                           onChange={(e) => setStep1Choice(e.target.value)}
-                          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-900"
+                          className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-3 text-base font-medium text-slate-900"
                         >
                           <option value="">-- Choose Step 1 --</option>
                           {currentQuestion.balanceConfig.step1Options.map((o) => (
@@ -722,14 +729,18 @@ export default function HomePage() {
                         </select>
                       </div>
                       <div>
-                        <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                        <label
+                          htmlFor="step2-select"
+                          className="block text-sm font-bold text-slate-700 mb-1.5"
+                        >
                           Step 2: Isolate x
                         </label>
                         <select
+                          id="step2-select"
                           value={step2Choice}
                           disabled={Boolean(lastFeedback)}
                           onChange={(e) => setStep2Choice(e.target.value)}
-                          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-900"
+                          className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-3 text-base font-medium text-slate-900"
                         >
                           <option value="">-- Choose Step 2 --</option>
                           {currentQuestion.balanceConfig.step2Options.map((o) => (
@@ -745,31 +756,39 @@ export default function HomePage() {
 
               {/* Format 3: Open-Ended Reasoning / Stretch */}
               {currentQuestion.format === "EXPLAIN" && (
-                <div className="space-y-3">
+                <div className="space-y-4">
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                    <label
+                      htmlFor="numeric-answer"
+                      className="block text-sm font-bold text-slate-700 mb-1.5"
+                    >
                       Value of x (number only):
                     </label>
                     <input
+                      id="numeric-answer"
                       type="text"
                       value={numericInput}
                       disabled={Boolean(lastFeedback)}
                       onChange={(e) => setNumericInput(e.target.value)}
                       placeholder="e.g., 16 or 5"
-                      className="w-full sm:w-48 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-900"
+                      className="w-full sm:w-56 rounded-xl border border-slate-300 px-4 py-3 text-base font-semibold text-slate-900"
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                    <label
+                      htmlFor="explanation-answer"
+                      className="block text-sm font-bold text-slate-700 mb-1.5"
+                    >
                       {currentQuestion.explanationPrompt || "Explain your steps:"}
                     </label>
                     <textarea
+                      id="explanation-answer"
                       rows={3}
                       value={explanationInput}
                       disabled={Boolean(lastFeedback)}
                       onChange={(e) => setExplanationInput(e.target.value)}
-                      placeholder="Write one or two short sentences..."
-                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900"
+                      placeholder="Write one or two short sentences in your own words..."
+                      className="w-full rounded-xl border border-slate-300 px-4 py-3 text-base text-slate-900"
                     />
                   </div>
                 </div>
@@ -777,14 +796,14 @@ export default function HomePage() {
 
               {/* Hint Box */}
               {hintVisible && (
-                <div className="rounded-xl bg-sky-50 border border-sky-200 px-4 py-2.5 text-xs text-sky-950">
+                <div className="rounded-xl bg-sky-50 border border-sky-200 px-4 py-3 text-sm text-sky-950">
                   <strong>Hint:</strong> {currentQuestion.hint}
                 </div>
               )}
 
               {/* Action Buttons */}
               {!lastFeedback && (
-                <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
                   <button
                     type="button"
                     onClick={() => {
@@ -793,87 +812,118 @@ export default function HomePage() {
                         setHintCount((c) => c + 1);
                       }
                     }}
-                    className="rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                    className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                   >
                     {hintVisible ? "Hint Shown" : "Show Hint"}
                   </button>
 
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      disabled={isSubmitting}
-                      onClick={() => submitPracticeAnswer()}
-                      className="rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-50"
-                    >
-                      {isSubmitting ? "Checking..." : "Check Answer"}
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => submitPracticeAnswer()}
+                    className="rounded-xl bg-indigo-600 px-6 py-3.5 text-base font-bold text-white hover:bg-indigo-700 disabled:opacity-50"
+                  >
+                    {isSubmitting ? "Checking..." : "Check My Answer"}
+                  </button>
                 </div>
               )}
 
-              {/* Feedback & Adaptive Routing Banner */}
+              {/* Warm, Encouraging Feedback Banner */}
               {lastFeedback && (
                 <div
-                  className={`rounded-xl border p-4 space-y-3 ${
+                  className={`rounded-xl border p-5 space-y-4 ${
                     lastFeedback.isCorrect
                       ? "bg-emerald-50 border-emerald-200 text-emerald-950"
                       : "bg-amber-50 border-amber-300 text-amber-950"
                   }`}
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-sm font-bold">
+                    <span className="text-base font-bold">
                       {lastFeedback.isCorrect
-                        ? "Correct!"
-                        : `Misconception Detected: ${lastFeedback.misconceptionTag}`}
+                        ? "Great job! That's right."
+                        : "Good try — let's check this step together:"}
                     </span>
-                    <span className="rounded-full bg-white px-2.5 py-0.5 text-xs font-bold border border-slate-200 text-slate-800">
-                      Decision: {lastFeedback.outcome}
+                    <span className="rounded-full bg-white px-3 py-1 text-xs font-bold border border-slate-200 text-slate-700">
+                      {lastFeedback.outcome === "ADVANCE"
+                        ? "Next: Level Up"
+                        : lastFeedback.outcome === "REMEDIATE_MISCONCEPTION"
+                          ? "Next: Targeted Practice"
+                          : "Next: Quick Base Check"}
                     </span>
                   </div>
-                  <p className="text-sm leading-relaxed">{lastFeedback.feedback}</p>
+                  <p className="text-base leading-relaxed">{lastFeedback.feedback}</p>
 
-                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                  <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
                     <button
                       type="button"
                       onClick={handleAdvanceToNextQuestion}
-                      className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800"
+                      className="rounded-xl bg-slate-900 px-5 py-3 text-sm font-bold text-white hover:bg-slate-800"
                     >
-                      Continue to Next Adaptive Item ({lastFeedback.nextQuestionId}) &rarr;
+                      Continue to Next Question &rarr;
                     </button>
                     <button
                       type="button"
                       onClick={() => setScreen("report")}
-                      className="rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                      className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                     >
-                      Finish & View Mastery Report
+                      Finish &amp; See Summary
                     </button>
                   </div>
                 </div>
               )}
             </section>
 
-            {/* Collapsible Tutor Decision Rule Trace Panel */}
+            {/* Discreet Collapsible Teacher / Evaluator Tools (Demo Quick-Fill + Decision Trace) */}
             <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
               <button
                 type="button"
-                onClick={() => setTraceOpen((o) => !o)}
-                className="w-full flex items-center justify-between text-left"
+                onClick={() => setToolsOpen((o) => !o)}
+                className="w-full flex items-center justify-between text-left py-1"
               >
-                <span className="text-xs font-bold uppercase tracking-wide text-slate-700">
-                  Tutor Decision Rule Trace ({traceLog.length} steps logged)
+                <span className="text-xs font-bold uppercase tracking-wide text-slate-600">
+                  Teacher &amp; Evaluator Tools (Decision Rule Trace &amp; Demo Scenarios ·{" "}
+                  {traceLog.length} logged)
                 </span>
                 <span className="text-xs font-semibold text-indigo-700">
-                  {traceOpen ? "Hide" : "Show"}
+                  {toolsOpen ? "Hide" : "Expand"}
                 </span>
               </button>
 
-              {traceOpen && (
-                <div className="mt-3 space-y-2">
+              {toolsOpen && (
+                <div className="mt-4 space-y-4 border-t border-slate-100 pt-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-indigo-50/70 border border-indigo-200 p-3">
+                    <span className="text-xs font-bold text-indigo-950">
+                      Quick-Fill Demo Scenarios:
+                    </span>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => runDemoQuickFill("A_CORRECT")}
+                        className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
+                      >
+                        Scenario A: Correct (ADVANCE)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => runDemoQuickFill("B_M1")}
+                        className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700"
+                      >
+                        Scenario B1: M1 Error (REMEDIATE)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => runDemoQuickFill("B_M2")}
+                        className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-rose-700"
+                      >
+                        Scenario B2: 2nd Error (PREREQUISITE)
+                      </button>
+                    </div>
+                  </div>
+
                   {traceLog.length === 0 ? (
                     <p className="text-xs text-slate-500">
-                      Submit an answer (or use the Evaluator Demo Quick-Fill above) to inspect live
-                      decision-rule routing across ADVANCE, REMEDIATE_MISCONCEPTION, and
-                      STEP_BACK_PREREQUISITE.
+                      Submit an answer or click a demo scenario above to inspect live adaptive
+                      decision-rule routing.
                     </p>
                   ) : (
                     <div className="overflow-x-auto">
@@ -919,61 +969,63 @@ export default function HomePage() {
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h2 className="text-2xl font-bold text-slate-900">
-                  Session Mastery Report — Aarav Kamble
+                  Great Effort Today, Aarav!
                 </h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Topic: P4-T3 Linear Equations in One Variable · Starting Level: {startingLevel}
+                <p className="text-sm text-slate-600 mt-0.5">
+                  Topic: Linear Equations in One Variable · Starting Level: {startingLevel}
                 </p>
               </div>
-              <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-800">
+              <span className="rounded-full bg-emerald-100 px-3.5 py-1.5 text-sm font-bold text-emerald-800">
                 Accuracy: {accuracyPct}% ({correctAttempts}/{totalAttempts})
               </span>
             </div>
 
-            <div className="grid sm:grid-cols-3 gap-3">
+            <div className="grid sm:grid-cols-3 gap-3.5">
               <div className="rounded-xl bg-slate-50 border border-slate-200 p-4">
-                <p className="text-xs font-semibold text-slate-500">Questions Completed</p>
+                <p className="text-xs font-semibold text-slate-500">Questions Practiced</p>
                 <p className="text-2xl font-bold text-slate-900 mt-1">{totalAttempts}</p>
               </div>
               <div className="rounded-xl bg-slate-50 border border-slate-200 p-4">
-                <p className="text-xs font-semibold text-slate-500">Misconceptions Detected</p>
+                <p className="text-xs font-semibold text-slate-500">Areas Checked</p>
                 <p className="text-sm font-bold text-amber-800 mt-1">
                   {detectedMisconceptions.length > 0
                     ? detectedMisconceptions.join(", ")
-                    : "None detected"}
+                    : "All clear!"}
                 </p>
               </div>
               <div className="rounded-xl bg-slate-50 border border-slate-200 p-4">
-                <p className="text-xs font-semibold text-slate-500">Misconceptions Resolved</p>
+                <p className="text-xs font-semibold text-slate-500">Skills Strengthened</p>
                 <p className="text-sm font-bold text-emerald-800 mt-1">
                   {resolvedMisconceptions.length > 0
                     ? resolvedMisconceptions.join(", ")
-                    : "Keep practicing to resolve"}
+                    : "Keep practicing to unlock"}
                 </p>
               </div>
             </div>
 
             <div className="space-y-2">
-              <h3 className="text-sm font-bold text-slate-900">
-                Adaptive Decision Rule History
-              </h3>
+              <h3 className="text-base font-bold text-slate-900">Your Practice Journey</h3>
               {traceLog.length === 0 ? (
-                <p className="text-xs text-slate-500">
-                  No practice items submitted yet. Visit Screen 4 (Practice) to log adaptive steps.
+                <p className="text-sm text-slate-500">
+                  No practice items submitted yet. Go to Practice to try a few questions!
                 </p>
               ) : (
-                <ul className="space-y-1.5 text-xs">
+                <ul className="space-y-2 text-sm">
                   {traceLog.map((t) => (
                     <li
                       key={t.stepNumber}
-                      className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 flex flex-wrap items-center justify-between gap-2"
+                      className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 flex flex-wrap items-center justify-between gap-2"
                     >
                       <span>
                         <strong>Step {t.stepNumber}:</strong> {t.equation} &rarr;{" "}
-                        <code>{t.learnerAnswer}</code> ({t.misconceptionTag})
+                        <code>{t.learnerAnswer}</code>
                       </span>
-                      <span className="font-bold text-indigo-700">
-                        {t.outcome} &rarr; {t.nextQuestionId}
+                      <span
+                        className={`font-semibold ${
+                          t.isCorrect ? "text-emerald-700" : "text-amber-700"
+                        }`}
+                      >
+                        {t.isCorrect ? "Solved" : `Guided (${t.misconceptionTag})`}
                       </span>
                     </li>
                   ))}
@@ -985,23 +1037,23 @@ export default function HomePage() {
               <button
                 type="button"
                 onClick={() => setScreen("practice")}
-                className="rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-indigo-700"
+                className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-bold text-white hover:bg-indigo-700"
               >
                 Continue Practicing
               </button>
               <button
                 type="button"
                 onClick={restartSession}
-                className="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
               >
-                Reset Session for Next Student
+                Clear &amp; Pass Tablet to Next Peer
               </button>
               <button
                 type="button"
                 onClick={() => setShowAbout(true)}
-                className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-semibold text-indigo-800 hover:bg-indigo-100"
+                className="rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm font-semibold text-indigo-800 hover:bg-indigo-100"
               >
-                View About &amp; Exam Card (24B1292)
+                About &amp; Exam Card (24B1292)
               </button>
             </div>
           </section>
@@ -1009,9 +1061,9 @@ export default function HomePage() {
       </main>
 
       {/* Mandatory Persistent Footer on Every Single Screen/State */}
-      <footer className="border-t border-slate-200 bg-white py-3 px-4 text-center text-xs text-slate-600">
+      <footer className="border-t border-slate-200 bg-white py-3.5 px-4 text-center text-xs text-slate-600">
         <span className="font-bold text-slate-900">Roll No: 24B1292</span> · ET617 End-Semester
-        Examination (P4-T3-L2-C1) · Low-Bandwidth Adaptive Tutor
+        Examination (P4-T3-L2-C1) · BalanceMath Tutor
       </footer>
 
       <AboutModal isOpen={showAbout} onClose={() => setShowAbout(false)} />
