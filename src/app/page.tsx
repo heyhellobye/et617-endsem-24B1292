@@ -754,6 +754,35 @@ export default function HomePage() {
                 )}
               </div>
 
+              {/* Prerequisite Teaching Mini-Lesson (shown after 2 consecutive errors) */}
+              {currentQuestion.id === "Q_PREREQ_1" && (
+                <div className="rounded-xl border border-indigo-200 bg-indigo-50/70 p-4 sm:p-5 space-y-3">
+                  <p className="text-sm font-bold text-indigo-950">
+                    Let&apos;s Pause &amp; Learn Together (30-Second Refresher)
+                  </p>
+                  <div className="grid sm:grid-cols-2 gap-3 text-xs sm:text-sm">
+                    <div className="rounded-lg bg-white border border-indigo-100 p-3 space-y-1">
+                      <p className="font-bold text-indigo-800">1. Keep Bags &amp; Coins Separate</p>
+                      <p className="text-slate-700">
+                        <strong>4x + 3</strong> means <strong>4 mystery x-bags</strong> and{" "}
+                        <strong>3 loose ₹1 coins</strong>. Never add 4 and 3 to make 7x!
+                      </p>
+                    </div>
+                    <div className="rounded-lg bg-white border border-indigo-100 p-3 space-y-1">
+                      <p className="font-bold text-emerald-800">2. Flip the Sign on Both Sides</p>
+                      <p className="text-slate-700">
+                        To undo <strong>+3</strong>, <strong>subtract 3</strong> from both sides. To
+                        undo <strong>−6</strong>, <strong>add 6</strong> to both sides.
+                      </p>
+                    </div>
+                  </div>
+                  <p className="text-xs text-indigo-900 font-medium">
+                    Try testing <strong>x = 2</strong>: <code>4(2) + 3 = 11</code>, while{" "}
+                    <code>7(2) = 14</code>. Now answer the quick check below!
+                  </p>
+                </div>
+              )}
+
               {/* Format 1: Diagnostic Multiple Choice */}
               {currentQuestion.format === "MCQ" && currentQuestion.options && (
                 <div className="grid sm:grid-cols-2 gap-3.5">
