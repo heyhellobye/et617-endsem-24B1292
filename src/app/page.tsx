@@ -47,8 +47,8 @@ export default function HomePage() {
   const [explanationInput, setExplanationInput] = useState<string>("");
   const [step1Choice, setStep1Choice] = useState<string>("");
   const [step2Choice, setStep2Choice] = useState<string>("");
-  const [hintVisible, setHintVisible] = useState<boolean>(false);
   const [hintCount, setHintCount] = useState<number>(0);
+  const [inputError, setInputError] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   // Adaptive tracking signals
@@ -136,8 +136,8 @@ export default function HomePage() {
     setExplanationInput("");
     setStep1Choice("");
     setStep2Choice("");
-    setHintVisible(false);
     setHintCount(0);
+    setInputError("");
   };
 
   const submitPracticeAnswer = async (override?: {
@@ -165,7 +165,15 @@ export default function HomePage() {
       learnerAnswer = `Step1:${s1}, Step2:${s2}`;
     }
 
-    if (!learnerAnswer.trim()) return;
+    if (!learnerAnswer.trim()) {
+      setInputError("Please choose or enter an answer first.");
+      return;
+    }
+    if (targetQ.requireExplanation && !override && !expVal.trim()) {
+      setInputError("Please write one short sentence explaining your steps so we can check your reasoning.");
+      return;
+    }
+    setInputError("");
 
     setIsSubmitting(true);
     try {
@@ -248,6 +256,12 @@ export default function HomePage() {
 
   const handleAdvanceToNextQuestion = () => {
     if (!lastFeedback) return;
+    if (lastFeedback.nextQuestionId === "COMPLETE") {
+      setLastFeedback(null);
+      resetQuestionInputs();
+      setScreen("report");
+      return;
+    }
     setCurrentQuestionId(lastFeedback.nextQuestionId);
     setLastFeedback(null);
     resetQuestionInputs();
@@ -651,9 +665,15 @@ export default function HomePage() {
               </div>
 
               <div className="space-y-2">
-                <div className="text-2xl sm:text-3xl font-mono font-bold text-slate-900 bg-slate-50 border border-slate-200 rounded-xl px-5 py-3.5 inline-block">
-                  {currentQuestion.equation}
-                </div>
+                {!currentQuestion.hideEquationUpfront ? (
+                  <div className="text-2xl sm:text-3xl font-mono font-bold text-slate-900 bg-slate-50 border border-slate-200 rounded-xl px-5 py-3.5 inline-block">
+                    {currentQuestion.equation}
+                  </div>
+                ) : (
+                  <div className="inline-block rounded-xl bg-amber-50 border border-amber-200 px-4 py-2 text-xs font-bold text-amber-900">
+                    Word Problem · Try setting up the equation yourself (or use Hint 1!)
+                  </div>
+                )}
                 <p className="text-base sm:text-lg font-semibold text-slate-900 pt-1">
                   {currentQuestion.prompt}
                 </p>
@@ -794,10 +814,20 @@ export default function HomePage() {
                 </div>
               )}
 
-              {/* Hint Box */}
-              {hintVisible && (
-                <div className="rounded-xl bg-sky-50 border border-sky-200 px-4 py-3 text-sm text-sky-950">
-                  <strong>Hint:</strong> {currentQuestion.hint}
+              {/* Progressive Hints Box */}
+              {hintCount > 0 && (
+                <div className="rounded-xl bg-sky-50 border border-sky-200 px-4 py-3 space-y-1.5 text-sm text-sky-950">
+                  {currentQuestion.hints.slice(0, hintCount).map((h, idx) => (
+                    <p key={idx}>
+                      <strong>Hint {idx + 1}:</strong> {h}
+                    </p>
+                  ))}
+                </div>
+              )}
+
+              {inputError && (
+                <div className="rounded-xl bg-rose-50 border border-rose-200 px-4 py-2.5 text-sm font-medium text-rose-800">
+                  {inputError}
                 </div>
               )}
 
@@ -806,15 +836,17 @@ export default function HomePage() {
                 <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
                   <button
                     type="button"
+                    disabled={hintCount >= currentQuestion.hints.length}
                     onClick={() => {
-                      if (!hintVisible) {
-                        setHintVisible(true);
+                      if (hintCount < currentQuestion.hints.length) {
                         setHintCount((c) => c + 1);
                       }
                     }}
-                    className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    className="rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                   >
-                    {hintVisible ? "Hint Shown" : "Show Hint"}
+                    {hintCount >= currentQuestion.hints.length
+                      ? `All Hints Shown (${hintCount}/${currentQuestion.hints.length})`
+                      : `Show Hint (${hintCount + 1}/${currentQuestion.hints.length})`}
                   </button>
 
                   <button
@@ -859,7 +891,9 @@ export default function HomePage() {
                       onClick={handleAdvanceToNextQuestion}
                       className="rounded-xl bg-slate-900 px-5 py-3 text-sm font-bold text-white hover:bg-slate-800"
                     >
-                      Continue to Next Question &rarr;
+                      {lastFeedback.nextQuestionId === "COMPLETE"
+                        ? "All Done! View Your Summary →"
+                        : "Continue to Next Question →"}
                     </button>
                     <button
                       type="button"
